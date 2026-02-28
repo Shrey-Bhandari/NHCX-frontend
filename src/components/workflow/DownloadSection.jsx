@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { FileJson, Copy, Check, DownloadCloud, RefreshCw } from 'lucide-react';
+import { FileJson, FileSpreadsheet, Copy, Check, DownloadCloud, RefreshCw } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export function DownloadSection({ fhirBundle, onReset }) {
     const [copied, setCopied] = useState(false);
@@ -24,12 +25,42 @@ export function DownloadSection({ fhirBundle, onReset }) {
         URL.revokeObjectURL(url);
     };
 
+    const handleExcelDownload = () => {
+        try {
+            const entries = fhirBundle?.fhirJson?.entry || [];
+            if (entries.length === 0) {
+                alert("No data to export");
+                return;
+            }
+
+            // Create flat data for excel
+            const flatData = entries.map(entry => {
+                const resource = entry.resource || {};
+                return {
+                    "Resource Type": resource.resourceType || "",
+                    "ID": resource.id || "",
+                    "Status": resource.status || "",
+                    "Name": resource.name || ""
+                };
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(flatData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Resources");
+
+            XLSX.writeFile(workbook, `nhcx-bundle-${new Date().getTime()}.xlsx`);
+        } catch (error) {
+            console.error("Error generating Excel:", error);
+            alert("Failed to generate Excel file.");
+        }
+    };
+
     return (
         <div className="flex flex-col h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="mb-6 flex justify-between items-end">
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Export Artifact</h2>
-                    <p className="text-gray-500 mt-1">Download the generated JSON or copy it to clipboard.</p>
+                    <p className="text-gray-500 mt-1">Download the generated JSON or export to Excel.</p>
                 </div>
                 <button
                     onClick={onReset}
@@ -60,7 +91,13 @@ export function DownloadSection({ fhirBundle, onReset }) {
                         {jsonString}
                     </pre>
                 </div>
-                <div className="bg-[#252526] p-4 border-t border-[#333] flex justify-end">
+                <div className="bg-[#252526] p-4 border-t border-[#333] flex justify-end gap-3">
+                    <button
+                        onClick={handleExcelDownload}
+                        className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                    >
+                        <FileSpreadsheet className="w-5 h-5" /> Download Excel
+                    </button>
                     <button
                         onClick={handleDownload}
                         className="bg-medical-600 hover:bg-medical-700 text-white font-medium py-2 px-6 rounded-lg shadow-sm transition-colors flex items-center gap-2"
