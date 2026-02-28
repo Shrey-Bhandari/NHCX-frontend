@@ -53,13 +53,13 @@ function App() {
 
     // Determine what data to show in JSON panel based on current step
     const getContextData = () => {
-        switch (currentStep) {
-            case 0: return { status: "Awaiting PDF file..." };
-            case 1: return { status: "Extracted elements", data: extractedContext };
-            case 2: return { status: "Pending generation", reviewedPayload: reviewedData, validationResult };
-            case 3: return { status: "Ready for export", resourceType: "Bundle", payload: validationResult?.fhirJson };
-            default: return {};
+        if (extractedContext) {
+            return {
+                status: "Structured Review JSON",
+                data: extractedContext
+            };
         }
+        return { status: "Awaiting PDF file..." };
     };
 
     const handleReviewDataChange = (updatedData) => {
