@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { UploadCloud, FileText } from 'lucide-react';
 
-export function UploadSection({ onUploadComplete }) {
+export function UploadSection({ onUploadComplete, onChunk, onLog }) {
     const [isUploading, setIsUploading] = useState(false);
     const [file, setFile] = useState(null);
     const [currentChunk, setCurrentChunk] = useState(0);
-    const totalChunks = 9;
+    const [processingLogs, setProcessingLogs] = useState([]);
+    // we track number of chunks to show progress, not required for parsing
+    const [chunks, setChunks] = useState([]);
+    // we don't know total up front, it will grow as the stream comes in
+    const totalChunks = chunks.length;
 
     const handleDragOver = (e) => {
         e.preventDefault();
@@ -24,28 +28,80 @@ export function UploadSection({ onUploadComplete }) {
         }
     };
 
-    const handleStartExtraction = () => {
+    const handleStartExtraction = async () => {
+        if (!file) return;
         setIsUploading(true);
-        setCurrentChunk(1);
+        setCurrentChunk(0);
+        setChunks([]);
+        setProcessingLogs([]);
 
-        let chunk = 1;
-        const interval = setInterval(() => {
-            chunk++;
-            if (chunk <= totalChunks) {
-                setCurrentChunk(chunk);
-            } else {
-                clearInterval(interval);
-                setIsUploading(false);
-                onUploadComplete({
-                    fileName: file.name,
-                    extractedData: {
-                        benefits: [{ id: 1, name: "Consultation", limit: "₹500", condition: "Per visit" }],
-                        subLimits: [{ id: 1, category: "Room Rent", limit: "1% of Sum Insured" }],
-                    },
-                    rawTextLength: 15420
-                });
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('http://localhost:8000/convert', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}`);
             }
-        }, 600); // 600ms per chunk for around ~5s total wait
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let done = false;
+            let fullText = '';
+            let chunkIndex = 0;
+
+            while (!done) {
+                const { value, done: doneReading } = await reader.read();
+                if (value) {
+                    const text = decoder.decode(value);
+                    chunkIndex += 1;
+
+                    // split into lines and filter
+                    const lines = text.split(/\r?\n/);
+                    lines.forEach(line => {
+                        const trimmed = line.trim();
+                        const procMatch = trimmed.match(/^Processing chunk \d+\/\d+/);
+                        if (procMatch) {
+                            // only keep progress messages
+                            setProcessingLogs(prev => [...prev, trimmed]);
+                            if (onLog) {
+                                onLog(trimmed);
+                            }
+                        } else {
+                            fullText += line + '\n';
+                            // append to streamingText state via callback if provided
+                            if (onChunk) {
+                                onChunk(line + '\n');
+                            }
+                        }
+                    });
+
+                    setChunks(prev => [...prev, text]);
+                    setCurrentChunk(chunkIndex);
+                    console.log('Received chunk', chunkIndex, text);
+                }
+                done = doneReading;
+            }
+
+            let jsonResult = null;
+            try {
+                jsonResult = JSON.parse(fullText);
+            } catch (e) {
+                console.error('Failed to parse JSON from server', e);
+                jsonResult = { raw: fullText };
+            }
+
+            onUploadComplete({ fileName: file.name, ...jsonResult });
+        } catch (err) {
+            console.error('Extraction error', err);
+            // TODO: set some error state to display to user
+        } finally {
+            setIsUploading(false);
+        }
     };
 
     return (
@@ -100,7 +156,7 @@ export function UploadSection({ onUploadComplete }) {
                             {isUploading && (
                                 <div
                                     className="absolute left-0 top-0 bottom-0 bg-medical-500 opacity-40 transition-all duration-300"
-                                    style={{ width: `${(currentChunk / totalChunks) * 100}%` }}
+                                    style={{ width: totalChunks ? `${(currentChunk / totalChunks) * 100}%` : '0%' }}
                                 ></div>
                             )}
                             <div className="relative z-10 flex items-center gap-2">
@@ -126,6 +182,19 @@ export function UploadSection({ onUploadComplete }) {
                     </div>
                 )}
             </div>
+
+            {/* show processing log lines (filtered) */}
+            {processingLogs.length > 0 && (
+                <div className="mt-4 p-2 bg-white rounded-md border border-gray-200 max-h-32 overflow-y-auto text-xs">
+                    <h4 className="font-semibold mb-1">Progress</h4>
+                    {processingLogs.map((log, idx) => (
+                        <div key={idx} className="mb-1">
+                            {log}
+                        </div>
+                    ))}
+                </div>
+            )}
+
         </div>
     );
 }
