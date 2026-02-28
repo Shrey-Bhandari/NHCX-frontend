@@ -34,14 +34,38 @@ export function DownloadSection({ fhirBundle, onReset }) {
             }
 
             // Create flat data for excel
-            const flatData = entries.map(entry => {
+            const flatData = [];
+
+            entries.forEach(entry => {
                 const resource = entry.resource || {};
-                return {
+
+                // Base resource info
+                const baseInfo = {
                     "Resource Type": resource.resourceType || "",
                     "ID": resource.id || "",
                     "Status": resource.status || "",
-                    "Name": resource.name || ""
+                    "Plan Name": resource.name || ""
                 };
+
+                // Check if there are defined coverage areas (benefits)
+                if (resource.coverageArea && resource.coverageArea.length > 0) {
+                    resource.coverageArea.forEach(area => {
+                        const extensions = area.extension || [];
+                        const benefitName = extensions.find(e => e.url.includes("coverageArea"))?.valueString || "";
+                        const benefitLimit = extensions.find(e => e.url.includes("limit"))?.valueString || "";
+                        const benefitCondition = extensions.find(e => e.url.includes("condition"))?.valueString || "";
+
+                        flatData.push({
+                            ...baseInfo,
+                            "Benefit Name": benefitName,
+                            "Limit": benefitLimit,
+                            "Condition": benefitCondition
+                        });
+                    });
+                } else {
+                    // Push at least the base info if no benefits
+                    flatData.push(baseInfo);
+                }
             });
 
             const worksheet = XLSX.utils.json_to_sheet(flatData);

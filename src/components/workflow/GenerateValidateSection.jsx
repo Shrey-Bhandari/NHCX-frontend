@@ -38,7 +38,23 @@ export function GenerateValidateSection({ reviewedData, onValidationComplete }) 
                                     resourceType: "InsurancePlan",
                                     id: "plan-example-1",
                                     status: "active",
-                                    name: reviewedData?.benefits?.[0]?.name || "Parsed Plan"
+                                    name: reviewedData?.benefits?.[0]?.name || "Parsed Plan",
+                                    coverageArea: reviewedData?.benefits?.map(b => ({
+                                        extension: [
+                                            {
+                                                url: "http://hl7.org/fhir/StructureDefinition/insuranceplan-coverageArea",
+                                                valueString: b.name
+                                            },
+                                            {
+                                                url: "http://hl7.org/fhir/StructureDefinition/insuranceplan-limit",
+                                                valueString: b.limit
+                                            },
+                                            {
+                                                url: "http://hl7.org/fhir/StructureDefinition/insuranceplan-condition",
+                                                valueString: b.condition
+                                            }
+                                        ]
+                                    })) || []
                                 }
                             }
                         ]
