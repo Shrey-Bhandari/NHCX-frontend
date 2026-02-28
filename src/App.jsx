@@ -9,6 +9,7 @@ import { DownloadSection } from './components/workflow/DownloadSection';
 
 function App() {
     const [currentStep, setCurrentStep] = useState(0);
+    const [highestStep, setHighestStep] = useState(0);
 
     // Centralized application state
     const [extractedContext, setExtractedContext] = useState(null);
@@ -18,11 +19,13 @@ function App() {
     const handleUploadComplete = (data) => {
         setExtractedContext(data);
         setCurrentStep(1); // Move to Review
+        setHighestStep(prev => Math.max(prev, 1));
     };
 
     const handleReviewComplete = (data) => {
         setReviewedData(data);
         setCurrentStep(2); // Move to Generate & Validate
+        setHighestStep(prev => Math.max(prev, 2));
     };
 
     const handleValidationComplete = (result) => {
@@ -30,14 +33,22 @@ function App() {
         // If validation fails entirely we could stay on step 2, but for now allow proceed if successful/warnings
         if (result.isValid) {
             setCurrentStep(3); // Move to Download
+            setHighestStep(prev => Math.max(prev, 3));
         }
     };
 
     const handleReset = () => {
         setCurrentStep(0);
+        setHighestStep(0);
         setExtractedContext(null);
         setReviewedData(null);
         setValidationResult(null);
+    };
+
+    const handleStepClick = (stepId) => {
+        if (stepId <= highestStep) {
+            setCurrentStep(stepId);
+        }
     };
 
     // Determine what data to show in JSON panel based on current step
@@ -61,7 +72,11 @@ function App() {
     return (
         <div className="h-screen w-screen flex flex-col bg-gray-50 overflow-hidden font-sans">
             <TopNav />
-            <StepIndicator currentStep={currentStep} />
+            <StepIndicator
+                currentStep={currentStep}
+                highestStep={highestStep}
+                onStepClick={handleStepClick}
+            />
 
             <main className="flex-1 flex overflow-hidden">
                 {/* Left Workflow Area */}

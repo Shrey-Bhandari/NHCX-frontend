@@ -9,7 +9,7 @@ const steps = [
     { id: 3, title: 'Download Bundle', icon: Download },
 ];
 
-export function StepIndicator({ currentStep }) {
+export function StepIndicator({ currentStep, highestStep = 0, onStepClick }) {
     return (
         <div className="w-full bg-white border-b border-gray-100 px-8 py-5">
             <div className="max-w-4xl mx-auto">
@@ -28,25 +28,30 @@ export function StepIndicator({ currentStep }) {
                         const Icon = step.icon;
                         const isCompleted = currentStep > step.id;
                         const isCurrent = currentStep === step.id;
+                        const isClickable = step.id <= highestStep && onStepClick;
 
                         return (
                             <div key={step.id} className="relative z-10 flex flex-col items-center gap-2">
-                                <div
+                                <button
+                                    onClick={() => isClickable && onStepClick(step.id)}
+                                    disabled={!isClickable}
                                     className={clsx(
-                                        "w-10 h-10 rounded-full flex items-center justify-center transition-colors duration-300 shadow-sm border-2",
+                                        "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm border-2 outline-none focus:ring-4 focus:ring-medical-50",
                                         isCompleted
                                             ? "bg-medical-500 border-medical-500 text-white"
                                             : isCurrent
                                                 ? "bg-white border-medical-500 text-medical-600 ring-4 ring-medical-50"
-                                                : "bg-white border-gray-200 text-gray-400"
+                                                : "bg-white border-gray-200 text-gray-400",
+                                        isClickable ? "cursor-pointer hover:scale-110" : "cursor-not-allowed opacity-70"
                                     )}
+                                    title={isClickable ? `Go back to ${step.title}` : undefined}
                                 >
                                     <Icon className="w-5 h-5" />
-                                </div>
+                                </button>
                                 <span
                                     className={clsx(
                                         "text-xs font-medium whitespace-nowrap",
-                                        isCurrent || isCompleted ? "text-gray-900" : "text-gray-500"
+                                        isCurrent || step.id <= highestStep ? "text-gray-900" : "text-gray-500"
                                     )}
                                 >
                                     {step.title}
