@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, CheckCircle, ShieldAlert, Edit2, Trash2, Plus, Undo } from 'lucide-react';
 
 const Card = ({ title, children, defaultOpen = true }) => {
@@ -28,6 +28,14 @@ export function ReviewSection({ data, onReviewComplete, onDataChange }) {
     // Local state to simulate editing
     const [benefits, setBenefits] = useState(data?.benefits || []);
     const [lastDeleted, setLastDeleted] = useState(null);
+
+    // Sync local table state if the parent data is updated externally (e.g. JSON Panel)
+    useEffect(() => {
+        if (data?.benefits) {
+            setBenefits(data.benefits);
+        }
+    }, [data?.benefits]);
+
     const handleProceed = () => {
         onReviewComplete({
             ...data,

@@ -95,7 +95,17 @@ function App() {
 
                 {/* Right JSON Panel */}
                 <div className="flex-[2] hidden lg:block border-l border-[#333]">
-                    <JsonPanel step={currentStep} data={getContextData()} />
+                    <JsonPanel
+                        step={currentStep}
+                        data={getContextData()}
+                        onJsonEdit={(parsedData) => {
+                            // The payload structure is { status: "...", data: { extractedData: { benefits: [...] } } }
+                            // We need to extract the actual data portion to update our state safely
+                            if (parsedData?.data) {
+                                setExtractedContext(parsedData.data);
+                            }
+                        }}
+                    />
                 </div>
             </main>
         </div>
