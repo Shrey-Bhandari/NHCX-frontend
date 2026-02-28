@@ -4,6 +4,8 @@ import { UploadCloud, FileText } from 'lucide-react';
 export function UploadSection({ onUploadComplete }) {
     const [isUploading, setIsUploading] = useState(false);
     const [file, setFile] = useState(null);
+    const [currentChunk, setCurrentChunk] = useState(0);
+    const totalChunks = 9;
 
     const handleDragOver = (e) => {
         e.preventDefault();
@@ -24,18 +26,26 @@ export function UploadSection({ onUploadComplete }) {
 
     const handleStartExtraction = () => {
         setIsUploading(true);
-        // Simulate API Call
-        setTimeout(() => {
-            setIsUploading(false);
-            onUploadComplete({
-                fileName: file.name,
-                extractedData: {
-                    benefits: [{ id: 1, name: "Consultation", limit: "₹500", condition: "Per visit" }],
-                    subLimits: [{ id: 1, category: "Room Rent", limit: "1% of Sum Insured" }],
-                },
-                rawTextLength: 15420
-            });
-        }, 1500);
+        setCurrentChunk(1);
+
+        let chunk = 1;
+        const interval = setInterval(() => {
+            chunk++;
+            if (chunk <= totalChunks) {
+                setCurrentChunk(chunk);
+            } else {
+                clearInterval(interval);
+                setIsUploading(false);
+                onUploadComplete({
+                    fileName: file.name,
+                    extractedData: {
+                        benefits: [{ id: 1, name: "Consultation", limit: "₹500", condition: "Per visit" }],
+                        subLimits: [{ id: 1, category: "Room Rent", limit: "1% of Sum Insured" }],
+                    },
+                    rawTextLength: 15420
+                });
+            }
+        }, 600); // 600ms per chunk for around ~5s total wait
     };
 
     return (
@@ -76,6 +86,7 @@ export function UploadSection({ onUploadComplete }) {
                             <button
                                 onClick={() => setFile(null)}
                                 className="text-gray-400 hover:text-red-500 transition-colors p-2"
+                                disabled={isUploading}
                             >
                                 ✕
                             </button>
@@ -84,20 +95,34 @@ export function UploadSection({ onUploadComplete }) {
                         <button
                             onClick={handleStartExtraction}
                             disabled={isUploading}
-                            className="w-full bg-medical-600 hover:bg-medical-700 text-white font-medium py-3 px-6 rounded-lg shadow-sm transition-all disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                            className={`w-full text-white font-medium py-3 px-6 rounded-lg shadow-sm transition-all flex justify-center items-center gap-2 relative overflow-hidden ${isUploading ? 'bg-medical-700 cursor-not-allowed' : 'bg-medical-600 hover:bg-medical-700'}`}
                         >
-                            {isUploading ? (
-                                <>
-                                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                    Extracting Content...
-                                </>
-                            ) : (
-                                "Start Extraction"
+                            {isUploading && (
+                                <div
+                                    className="absolute left-0 top-0 bottom-0 bg-medical-500 opacity-40 transition-all duration-300"
+                                    style={{ width: `${(currentChunk / totalChunks) * 100}%` }}
+                                ></div>
                             )}
+                            <div className="relative z-10 flex items-center gap-2">
+                                {isUploading ? (
+                                    <>
+                                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Processing chunk {currentChunk}/{totalChunks}...
+                                    </>
+                                ) : (
+                                    "Start Extraction"
+                                )}
+                            </div>
                         </button>
+
+                        {isUploading && (
+                            <p className="mt-4 text-sm text-medical-600 animate-pulse font-medium">
+                                Extracting structured review...
+                            </p>
+                        )}
                     </div>
                 )}
             </div>
