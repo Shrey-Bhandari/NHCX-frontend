@@ -1,7 +1,28 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldPlus } from 'lucide-react';
 
 export function TopNav() {
+    const [healthy, setHealthy] = useState(true);
+
+    useEffect(() => {
+        const check = () => {
+            fetch('http://localhost:8000/health')
+                .then(res => {
+                    if (res.ok) {
+                        setHealthy(true);
+                    } else {
+                        setHealthy(false);
+                    }
+                })
+                .catch(() => setHealthy(false));
+        };
+        // initial check
+        check();
+        // poll every 10s
+        const id = setInterval(check, 10000);
+        return () => clearInterval(id);
+    }, []);
+
     return (
         <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
@@ -16,8 +37,8 @@ export function TopNav() {
                 <span>Compliance Validation Tool</span>
                 <div className="h-4 w-px bg-gray-300"></div>
                 <span className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    System Ready
+                    <span className={`w-2 h-2 rounded-full ${healthy ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    {healthy ? 'System Ready' : 'Backend Unreachable'}
                 </span>
             </div>
         </header>

@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { FileJson, FileSpreadsheet, Copy, Check, DownloadCloud, RefreshCw } from 'lucide-react';
-import * as XLSX from 'xlsx';
 
-export function DownloadSection({ fhirBundle, onReset }) {
+export function DownloadSection({ fhirBundle, onReset, bundleToDownload }) {
     const [copied, setCopied] = useState(false);
 
-    const jsonString = fhirBundle ? JSON.stringify(fhirBundle.fhirJson, null, 2) : "{}";
+    // Determine source JSON for download / display. Prefer the explicit
+    // `bundleToDownload` (which mirrors the Console & JSON Context). Fall
+    // back to `fhirBundle.fhirJson` (legacy behavior).
+    const resolvedBundle = bundleToDownload || (fhirBundle && (fhirBundle.bundle || fhirBundle.fhirJson || fhirBundle));
+    const jsonString = resolvedBundle ? JSON.stringify(resolvedBundle, null, 2) : "{}";
 
     const handleCopy = () => {
         navigator.clipboard.writeText(jsonString);
@@ -25,59 +28,36 @@ export function DownloadSection({ fhirBundle, onReset }) {
         URL.revokeObjectURL(url);
     };
 
-    const handleExcelDownload = () => {
+    const handleDownloadExcel = async () => {
         try {
-            const entries = fhirBundle?.fhirJson?.entry || [];
-            if (entries.length === 0) {
-                alert("No data to export");
-                return;
-            }
-
-            // Create flat data for excel
-            const flatData = [];
-
-            entries.forEach(entry => {
-                const resource = entry.resource || {};
-
-                // Base resource info
-                const baseInfo = {
-                    "Resource Type": resource.resourceType || "",
-                    "ID": resource.id || "",
-                    "Status": resource.status || "",
-                    "Plan Name": resource.name || ""
-                };
-
-                // Check if there are defined coverage areas (benefits)
-                if (resource.coverageArea && resource.coverageArea.length > 0) {
-                    resource.coverageArea.forEach(area => {
-                        const extensions = area.extension || [];
-                        const benefitName = extensions.find(e => e.url.includes("coverageArea"))?.valueString || "";
-                        const benefitLimit = extensions.find(e => e.url.includes("limit"))?.valueString || "";
-                        const benefitCondition = extensions.find(e => e.url.includes("condition"))?.valueString || "";
-
-                        flatData.push({
-                            ...baseInfo,
-                            "Benefit Name": benefitName,
-                            "Limit": benefitLimit,
-                            "Condition": benefitCondition
-                        });
-                    });
-                } else {
-                    // Push at least the base info if no benefits
-                    flatData.push(baseInfo);
-                }
+            const resp = await fetch('http://localhost:8000/bundle_excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonString
             });
-
-            const worksheet = XLSX.utils.json_to_sheet(flatData);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Resources");
-
-            XLSX.writeFile(workbook, `nhcx-bundle-${new Date().getTime()}.xlsx`);
-        } catch (error) {
-            console.error("Error generating Excel:", error);
-            alert("Failed to generate Excel file.");
+            if (!resp.ok) {
+                let details = '';
+                try {
+                    const json = await resp.json();
+                    if (json && json.details) details = json.details;
+                } catch {}
+                throw new Error(`Server ${resp.status} ${details}`);
+            }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `nhcx-bundle-${new Date().getTime()}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Excel download failed', err);
+            alert(err.message || 'Excel download failed');
         }
     };
+
 
     return (
         <div className="flex flex-col h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -115,12 +95,12 @@ export function DownloadSection({ fhirBundle, onReset }) {
                         {jsonString}
                     </pre>
                 </div>
-                <div className="bg-[#252526] p-4 border-t border-[#333] flex justify-end gap-3">
+                <div className="p-4 border-t border-[#333] flex justify-end gap-3 bg-transparent">
                     <button
-                        onClick={handleExcelDownload}
+                        onClick={handleDownloadExcel}
                         className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg shadow-sm transition-colors flex items-center gap-2"
                     >
-                        <FileSpreadsheet className="w-5 h-5" /> Download Excel
+                        <FileSpreadsheet className="w-5 h-5" /> Download FHIR Mapping
                     </button>
                     <button
                         onClick={handleDownload}

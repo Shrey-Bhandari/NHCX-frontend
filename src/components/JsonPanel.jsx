@@ -1,35 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 export function JsonPanel({ step, data, onJsonEdit }) {
     const [localJson, setLocalJson] = useState('');
     const [error, setError] = useState(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const prevDataRef = useRef(null);
 
-    // Sync external data changes to local state, but only when it structurally changes
-    // to avoid resetting the cursor while typing valid JSON
+    // Sync external data changes to local state unless user is actively editing
     useEffect(() => {
-        setLocalJson(JSON.stringify(data, null, 2));
-        setError(null);
-    }, [data]);
+        const serialized = JSON.stringify(data, null, 2);
+        if (!isEditing && prevDataRef.current !== serialized) {
+            setLocalJson(serialized);
+            setError(null);
+            prevDataRef.current = serialized;
+        }
+    }, [data, isEditing]);
 
     const handleJsonChange = (e) => {
-        const newValue = e.target.value;
-        setLocalJson(newValue);
+        setLocalJson(e.target.value);
+        setError(null);
+    };
 
-        // Only attempt to parse and lift state if we are in step 1 (Structured Review)
-        if (step === 1 && onJsonEdit) {
-            try {
-                const parsed = JSON.parse(newValue);
-                setError(null);
-                // Call the parent update function
-                onJsonEdit(parsed);
-            } catch (err) {
-                // If it's invalid JSON while typing, just show an error but don't crash
-                setError("Invalid JSON format");
-            }
+    const handleEdit = () => {
+        setIsEditing(true);
+    };
+
+    const handleCancel = () => {
+        setLocalJson(JSON.stringify(data, null, 2));
+        setError(null);
+        setIsEditing(false);
+    };
+
+    const handleSave = () => {
+        try {
+            const parsed = JSON.parse(localJson);
+            setError(null);
+            setIsEditing(false);
+            if (onJsonEdit) onJsonEdit(parsed);
+        } catch (err) {
+            setError('Invalid JSON: ' + (err.message || 'parse error'));
         }
     };
 
     const isEditable = step === 1;
+
+    // We show the full JSON when not editing (per updated requirements).
 
     return (
         <div className="h-full flex flex-col bg-[#1E1E1E] text-gray-300 font-mono text-sm shadow-inner relative">
@@ -51,22 +66,29 @@ export function JsonPanel({ step, data, onJsonEdit }) {
                     <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-medical-500/20 text-medical-400 border border-medical-500/30">
                         State: {["Waiting", "Reviewing", "Validating", "Ready"][step]}
                     </span>
+                    {isEditable && (
+                        <div className="ml-2 flex items-center gap-2">
+                            {!isEditing ? (
+                                <button onClick={handleEdit} className="text-xs px-2 py-1 border rounded bg-gray-800 hover:bg-gray-700">Edit</button>
+                            ) : (
+                                <>
+                                    <button onClick={handleSave} className="text-xs px-2 py-1 border rounded bg-green-700 hover:bg-green-600">Save</button>
+                                    <button onClick={handleCancel} className="text-xs px-2 py-1 border rounded bg-gray-800 hover:bg-gray-700">Cancel</button>
+                                </>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
 
-            <div className="flex-1 overflow-hidden relative">
-                {isEditable ? (
-                    <textarea
-                        value={localJson}
-                        onChange={handleJsonChange}
-                        spellCheck={false}
-                        className="absolute inset-0 w-full h-full bg-transparent text-[#D4D4D4] text-xs leading-relaxed p-4 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 custom-scrollbar"
-                    />
-                ) : (
-                    <pre className="absolute inset-0 overflow-auto p-4 text-xs leading-relaxed text-[#D4D4D4] custom-scrollbar">
-                        {localJson}
-                    </pre>
-                )}
+            <div className="flex-1 overflow-hidden relativelex-1 overflow-hidden r">
+                <textarea
+                    value={localJson}
+                    onChange={handleJsonChange}
+                    spellCheck={false}
+                    readOnly={!(isEditable && isEditing)}
+                    className={`w-full h-full box-border bg-transparent text-[#D4D4D4] text-xs leading-relaxed px-10 py-4 resize-none focus:outline-none ${isEditing ? 'focus:ring-1 focus:ring-blue-500/50' : ''} custom-scrollbar`}
+                />
             </div>
         </div>
     );

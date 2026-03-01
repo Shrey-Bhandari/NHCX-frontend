@@ -116,25 +116,27 @@ function App() {
                     <div className="h-full flex flex-col max-w-5xl mx-auto">
                         {currentStep === 0 && <UploadSection onUploadComplete={handleUploadComplete} onChunk={(chunk) => setStreamingText(prev => prev + chunk)} onLog={(msg) => setProcessingLogs(prev => [...prev, msg])} />}
                         {currentStep === 1 && <ReviewSection
-                            data={extractedContext?.extractedData}
+                            data={extractedContext}
                             onReviewComplete={handleReviewComplete}
                             onDataChange={handleReviewDataChange}
                         />}
                         {currentStep === 2 && <GenerateValidateSection reviewedData={reviewedData} onValidationComplete={handleValidationComplete} />}
-                        {currentStep === 3 && <DownloadSection fhirBundle={validationResult} onReset={handleReset} />}
+                        {currentStep === 3 && <DownloadSection fhirBundle={validationResult} bundleToDownload={getContextData().data} onReset={handleReset} />}
                     </div>
                 </div>
 
                 {/* Right JSON Panel */}
-                <div className="flex-[2] hidden lg:block border-l border-[#333]">
+                <div className="flex-[3] hidden lg:block border-l border-[#333]"> 
                     <JsonPanel
                         step={currentStep}
                         data={getContextData()}
                         onJsonEdit={(parsedData) => {
-                            // The payload structure is { status: "...", data: { extractedData: { benefits: [...] } } }
-                            // We need to extract the actual data portion to update our state safely
+                            // Expecting the same structure used throughout: { status: "..", data: { extractedData: {...} } }
                             if (parsedData?.data) {
                                 setExtractedContext(parsedData.data);
+                                // Once user saves JSON, move them to the Review step
+                                setCurrentStep(1);
+                                setHighestStep(prev => Math.max(prev, 1));
                             }
                         }}
                     />

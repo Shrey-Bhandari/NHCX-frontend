@@ -5,11 +5,9 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
     const [isUploading, setIsUploading] = useState(false);
     const [file, setFile] = useState(null);
     const [currentChunk, setCurrentChunk] = useState(0);
+    const [totalChunks, setTotalChunks] = useState(0);
     const [processingLogs, setProcessingLogs] = useState([]);
-    // we track number of chunks to show progress, not required for parsing
-    const [chunks, setChunks] = useState([]);
-    // we don't know total up front, it will grow as the stream comes in
-    const totalChunks = chunks.length;
+    const [progressText, setProgressText] = useState('');
 
     const handleDragOver = (e) => {
         e.preventDefault();
@@ -32,8 +30,9 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
         if (!file) return;
         setIsUploading(true);
         setCurrentChunk(0);
-        setChunks([]);
+        setTotalChunks(0);
         setProcessingLogs([]);
+        setProgressText('');
 
         const formData = new FormData();
         formData.append('file', file);
@@ -48,54 +47,89 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
                 throw new Error(`Server returned ${response.status}`);
             }
 
+            if (!response.body) {
+                throw new Error('No response body from server');
+            }
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let done = false;
-            let fullText = '';
-            let chunkIndex = 0;
+            let buffer = '';
+            let jsonMode = false;
+            let jsonBuffer = '';
 
-            while (!done) {
-                const { value, done: doneReading } = await reader.read();
-                if (value) {
-                    const text = decoder.decode(value);
-                    chunkIndex += 1;
+            const processLine = (line) => {
+                const normalized = line.replace(/\r$/, '');
+                const trimmed = normalized.trim();
 
-                    // split into lines and filter
-                    const lines = text.split(/\r?\n/);
-                    lines.forEach(line => {
-                        const trimmed = line.trim();
-                        const procMatch = trimmed.match(/^Processing chunk \d+\/\d+/);
-                        if (procMatch) {
-                            // only keep progress messages
-                            setProcessingLogs(prev => [...prev, trimmed]);
-                            if (onLog) {
-                                onLog(trimmed);
-                            }
-                        } else {
-                            fullText += line + '\n';
-                            // append to streamingText state via callback if provided
-                            if (onChunk) {
-                                onChunk(line + '\n');
-                            }
+                if (!jsonMode) {
+                    if (trimmed === '---JSON RESULT---') {
+                        jsonMode = true;
+                        return;
+                    }
+
+                    
+                    // Detect a line that declares total chunks: "Processing X chunks..."
+                    const totalMatch = trimmed.match(/^Processing\s+(\d+)\s+chunks/i);
+                    if (totalMatch) {
+                        const total = Number.parseInt(totalMatch[1], 10);
+                        setTotalChunks(total);
+                        const logLine = `Processing ${total} chunks`;
+                        setProcessingLogs(prev => [...prev, logLine]);
+                        setProgressText(prev => prev + logLine + '\n');
+                        if (onLog) onLog(logLine);
+                        return;
+                    }
+
+                    const chunkMatch = trimmed.match(/^chunk\s+(\d+)\/(\d+)/i);
+
+                    if (chunkMatch) {
+                        const current = Number.parseInt(chunkMatch[1], 10);
+                        const total = Number.parseInt(chunkMatch[2], 10);
+                        const logLine = `Processing chunk ${current}/${total}`;
+
+                        setCurrentChunk(current);
+                        setTotalChunks(total);
+                        setProcessingLogs(prev => [...prev, logLine]);
+                        setProgressText(prev => prev + logLine + '\n');
+
+                        if (onLog) {
+                            onLog(logLine);
                         }
-                    });
-
-                    setChunks(prev => [...prev, text]);
-                    setCurrentChunk(chunkIndex);
-                    console.log('Received chunk', chunkIndex, text);
+                        if (onChunk) {
+                            onChunk(logLine + '\n');
+                        }
+                    }
+                    return;
                 }
-                done = doneReading;
+
+                jsonBuffer += normalized + '\n';
+            };
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (!value) continue;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    processLine(line);
+                }
             }
 
-            let jsonResult = null;
+            buffer += decoder.decode();
+            if (buffer) {
+                processLine(buffer);
+            }
+
             try {
-                jsonResult = JSON.parse(fullText);
-            } catch (e) {
-                console.error('Failed to parse JSON from server', e);
-                jsonResult = { raw: fullText };
+                const parsed = JSON.parse(jsonBuffer);
+                onUploadComplete(parsed);
+            } catch (parseErr) {
+                console.error('Failed to parse streamed JSON result', parseErr);
             }
-
-            onUploadComplete({ fileName: file.name, ...jsonResult });
         } catch (err) {
             console.error('Extraction error', err);
             // TODO: set some error state to display to user
@@ -166,7 +200,9 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
-                                        Processing chunk {currentChunk}/{totalChunks}...
+                                        {totalChunks > 0
+                                            ? `Processing chunk ${currentChunk}/${totalChunks}...`
+                                            : 'Processing...'}
                                     </>
                                 ) : (
                                     "Start Extraction"
@@ -183,15 +219,15 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
                 )}
             </div>
 
-            {/* show processing log lines (filtered) */}
-            {processingLogs.length > 0 && (
-                <div className="mt-4 p-2 bg-white rounded-md border border-gray-200 max-h-32 overflow-y-auto text-xs">
-                    <h4 className="font-semibold mb-1">Progress</h4>
-                    {processingLogs.map((log, idx) => (
-                        <div key={idx} className="mb-1">
-                            {log}
+            {/* show live stream output only - hide separate 'Progress' box per design */}
+            {progressText && (
+                <div className="mt-4">
+                    <div className="flex flex-col gap-1">
+                        <h4 className="font-semibold text-sm text-gray-700">Live Stream Output</h4>
+                        <div id="progress" className="p-3 bg-gray-900 text-green-400 rounded-md border border-gray-800 max-h-64 overflow-y-auto text-xs font-mono whitespace-pre-wrap break-all shadow-inner">
+                            {progressText}
                         </div>
-                    ))}
+                    </div>
                 </div>
             )}
 
