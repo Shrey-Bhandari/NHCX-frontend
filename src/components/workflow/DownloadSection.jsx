@@ -30,16 +30,20 @@ export function DownloadSection({ fhirBundle, onReset, bundleToDownload }) {
 
     const handleDownloadExcel = async () => {
         try {
-            const resp = await fetch('http://localhost:8000/bundle_excel', {
+            // Create FormData with the JSON as a file
+            const formData = new FormData();
+            const jsonBlob = new Blob([jsonString], { type: 'application/json' });
+            formData.append('file', jsonBlob, 'bundle.json');
+
+            const resp = await fetch('http://localhost:8000/json-to-excel', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: jsonString
+                body: formData
             });
             if (!resp.ok) {
                 let details = '';
                 try {
                     const json = await resp.json();
-                    if (json && json.details) details = json.details;
+                    if (json && json.detail) details = json.detail;
                 } catch {}
                 throw new Error(`Server ${resp.status} ${details}`);
             }
@@ -47,7 +51,7 @@ export function DownloadSection({ fhirBundle, onReset, bundleToDownload }) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `nhcx-bundle-${new Date().getTime()}.xlsx`;
+            a.download = `nhcx-mapping-${new Date().getTime()}.xlsx`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

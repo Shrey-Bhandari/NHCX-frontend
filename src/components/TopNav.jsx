@@ -6,15 +6,22 @@ export function TopNav() {
 
     useEffect(() => {
         const check = () => {
-            fetch('http://localhost:8000/health')
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            fetch('http://localhost:8000/health', { signal: controller.signal })
                 .then(res => {
+                    clearTimeout(timeoutId);
                     if (res.ok) {
                         setHealthy(true);
                     } else {
                         setHealthy(false);
                     }
                 })
-                .catch(() => setHealthy(false));
+                .catch(() => {
+                    clearTimeout(timeoutId);
+                    setHealthy(false);
+                });
         };
         // initial check
         check();

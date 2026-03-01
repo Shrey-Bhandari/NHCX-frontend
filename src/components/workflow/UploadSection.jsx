@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { UploadCloud, FileText } from 'lucide-react';
+import { UploadCloud, FileText, AlertCircle } from 'lucide-react';
 
 export function UploadSection({ onUploadComplete, onChunk, onLog }) {
     const [isUploading, setIsUploading] = useState(false);
     const [file, setFile] = useState(null);
-    const [currentChunk, setCurrentChunk] = useState(0);
-    const [totalChunks, setTotalChunks] = useState(0);
-    const [processingLogs, setProcessingLogs] = useState([]);
     const [progressText, setProgressText] = useState('');
+    const [errorMessage, setErrorMessage] = useState('');
+    const [progress, setProgress] = useState(0);
 
     const handleDragOver = (e) => {
         e.preventDefault();
@@ -17,124 +16,104 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
         e.preventDefault();
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             setFile(e.dataTransfer.files[0]);
+            setErrorMessage('');
         }
     };
 
     const handleFileChange = (e) => {
         if (e.target.files && e.target.files[0]) {
             setFile(e.target.files[0]);
+            setErrorMessage('');
         }
     };
 
     const handleStartExtraction = async () => {
         if (!file) return;
         setIsUploading(true);
-        setCurrentChunk(0);
-        setTotalChunks(0);
-        setProcessingLogs([]);
-        setProgressText('');
+        setErrorMessage('');
+        setProgressText('Starting PDF extraction...');
+        setProgress(0);
 
         const formData = new FormData();
         formData.append('file', file);
 
+        // Start polling for progress
+        const progressInterval = setInterval(async () => {
+            try {
+                const progressRes = await fetch('http://localhost:8000/progress');
+                if (progressRes.ok) {
+                    const progressData = await progressRes.json();
+                    setProgress(progressData.current_step || 0);
+                    setProgressText(progressData.message || 'Processing...');
+                }
+            } catch (err) {
+                // Silently ignore progress polling errors
+            }
+        }, 500); // Poll every 500ms for smooth updates
+
         try {
+            // Set a longer timeout for large PDFs (5 minutes)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
             const response = await fetch('http://localhost:8000/convert', {
                 method: 'POST',
                 body: formData,
+                signal: controller.signal,
             });
 
+            clearInterval(progressInterval); // Stop polling when complete
+            clearTimeout(timeoutId);
+
             if (!response.ok) {
-                throw new Error(`Server returned ${response.status}`);
-            }
-
-            if (!response.body) {
-                throw new Error('No response body from server');
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let jsonMode = false;
-            let jsonBuffer = '';
-
-            const processLine = (line) => {
-                const normalized = line.replace(/\r$/, '');
-                const trimmed = normalized.trim();
-
-                if (!jsonMode) {
-                    if (trimmed === '---JSON RESULT---') {
-                        jsonMode = true;
-                        return;
-                    }
-
-                    
-                    // Detect a line that declares total chunks: "Processing X chunks..."
-                    const totalMatch = trimmed.match(/^Processing\s+(\d+)\s+chunks/i);
-                    if (totalMatch) {
-                        const total = Number.parseInt(totalMatch[1], 10);
-                        setTotalChunks(total);
-                        const logLine = `Processing ${total} chunks`;
-                        setProcessingLogs(prev => [...prev, logLine]);
-                        setProgressText(prev => prev + logLine + '\n');
-                        if (onLog) onLog(logLine);
-                        return;
-                    }
-
-                    const chunkMatch = trimmed.match(/^chunk\s+(\d+)\/(\d+)/i);
-
-                    if (chunkMatch) {
-                        const current = Number.parseInt(chunkMatch[1], 10);
-                        const total = Number.parseInt(chunkMatch[2], 10);
-                        const logLine = `Processing chunk ${current}/${total}`;
-
-                        setCurrentChunk(current);
-                        setTotalChunks(total);
-                        setProcessingLogs(prev => [...prev, logLine]);
-                        setProgressText(prev => prev + logLine + '\n');
-
-                        if (onLog) {
-                            onLog(logLine);
-                        }
-                        if (onChunk) {
-                            onChunk(logLine + '\n');
-                        }
-                    }
-                    return;
+                let errorMsg = `Server error ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.detail || errorMsg;
+                } catch (e) {
+                    // If response is not JSON, use status text
+                    errorMsg = response.statusText || errorMsg;
                 }
+                throw new Error(errorMsg);
+            }
 
-                jsonBuffer += normalized + '\n';
-            };
-
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                if (!value) continue;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    processLine(line);
+            const data = await response.json();
+            
+            if (data.bundle) {
+                setProgressText('✓ Conversion complete!');
+                setProgress(100);
+                
+                // Call the callback with the full response
+                onUploadComplete(data.bundle);
+                
+                // Log the success
+                if (onLog) {
+                    onLog('PDF successfully converted to FHIR Bundle');
                 }
+            } else {
+                throw new Error('No bundle in response - backend did not return expected data');
             }
 
-            buffer += decoder.decode();
-            if (buffer) {
-                processLine(buffer);
-            }
-
-            try {
-                const parsed = JSON.parse(jsonBuffer);
-                onUploadComplete(parsed);
-            } catch (parseErr) {
-                console.error('Failed to parse streamed JSON result', parseErr);
-            }
         } catch (err) {
+            clearInterval(progressInterval); // Stop polling on error
             console.error('Extraction error', err);
-            // TODO: set some error state to display to user
+            let errorMsg = err.message || 'Unknown error during extraction';
+            
+            // Handle specific error types
+            if (err.name === 'AbortError') {
+                errorMsg = 'Request timeout - PDF processing took too long (>5 minutes)';
+            } else if (err instanceof TypeError && err.message === 'Failed to fetch') {
+                errorMsg = 'Cannot reach backend server. Ensure backend is running on http://localhost:8000';
+            }
+            
+            setErrorMessage(errorMsg);
+            setProgressText(`❌ Error: ${errorMsg}`);
+            if (onLog) {
+                onLog(`Error: ${errorMsg}`);
+            }
         } finally {
             setIsUploading(false);
+            clearInterval(progressInterval);
         }
     };
 
@@ -150,87 +129,83 @@ export function UploadSection({ onUploadComplete, onChunk, onLog }) {
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
             >
-                {!file ? (
+                {!isUploading && !file && (
                     <>
-                        <div className="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-4">
-                            <UploadCloud className="w-8 h-8 text-medical-500" />
-                        </div>
-                        <h3 className="text-lg font-medium text-gray-900 mb-1">Drag and drop your PDF here</h3>
-                        <p className="text-sm text-gray-500 mb-6">Max file size: 50MB</p>
-
-                        <label className="bg-white border border-gray-300 text-gray-700 font-medium py-2.5 px-6 rounded-lg shadow-sm hover:bg-gray-50 cursor-pointer transition-colors">
-                            Browse Files
-                            <input type="file" className="hidden" accept=".pdf" onChange={handleFileChange} />
+                        <UploadCloud className="w-16 h-16 text-gray-400 mb-4" />
+                        <p className="text-gray-600 font-medium mb-2">Drop your PDF here, or click to select</p>
+                        <p className="text-gray-500 text-sm mb-6">Supported format: PDF documents</p>
+                        <label className="bg-white border border-gray-300 rounded-lg px-6 py-2 text-gray-700 font-medium cursor-pointer hover:bg-gray-50 transition-colors">
+                            Choose File
+                            <input
+                                type="file"
+                                accept=".pdf"
+                                onChange={handleFileChange}
+                                className="hidden"
+                            />
                         </label>
                     </>
-                ) : (
-                    <div className="flex flex-col items-center w-full max-w-md">
-                        <div className="w-full bg-white border border-gray-200 rounded-lg p-4 flex items-center gap-4 mb-8 shadow-sm">
-                            <div className="bg-medical-50 p-3 rounded-lg text-medical-600">
-                                <FileText className="w-6 h-6" />
-                            </div>
-                            <div className="flex-1 overflow-hidden">
-                                <p className="text-sm font-medium text-gray-900 truncate">{file.name}</p>
-                                <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB • PDF Document</p>
-                            </div>
-                            <button
-                                onClick={() => setFile(null)}
-                                className="text-gray-400 hover:text-red-500 transition-colors p-2"
-                                disabled={isUploading}
-                            >
-                                ✕
-                            </button>
-                        </div>
+                )}
 
+                {file && !isUploading && !errorMessage && (
+                    <>
+                        <FileText className="w-16 h-16 text-medical-400 mb-4" />
+                        <p className="text-gray-900 font-medium mb-2">{file.name}</p>
+                        <p className="text-gray-500 text-sm mb-6">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                         <button
                             onClick={handleStartExtraction}
-                            disabled={isUploading}
-                            className={`w-full text-white font-medium py-3 px-6 rounded-lg shadow-sm transition-all flex justify-center items-center gap-2 relative overflow-hidden ${isUploading ? 'bg-medical-700 cursor-not-allowed' : 'bg-medical-600 hover:bg-medical-700'}`}
+                            className="bg-medical-600 hover:bg-medical-700 text-white font-medium py-3 px-8 rounded-lg shadow-sm transition-all"
                         >
-                            {isUploading && (
-                                <div
-                                    className="absolute left-0 top-0 bottom-0 bg-medical-500 opacity-40 transition-all duration-300"
-                                    style={{ width: totalChunks ? `${(currentChunk / totalChunks) * 100}%` : '0%' }}
-                                ></div>
-                            )}
-                            <div className="relative z-10 flex items-center gap-2">
-                                {isUploading ? (
-                                    <>
-                                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        {totalChunks > 0
-                                            ? `Processing chunk ${currentChunk}/${totalChunks}...`
-                                            : 'Processing...'}
-                                    </>
-                                ) : (
-                                    "Start Extraction"
-                                )}
-                            </div>
+                            Start Extraction
                         </button>
+                        <button
+                            onClick={() => {
+                                setFile(null);
+                                setErrorMessage('');
+                            }}
+                            className="text-gray-500 hover:text-gray-700 text-sm mt-4"
+                        >
+                            Change file
+                        </button>
+                    </>
+                )}
 
-                        {isUploading && (
-                            <p className="mt-4 text-sm text-medical-600 animate-pulse font-medium">
-                                Extracting structured review...
-                            </p>
+                {isUploading && (
+                    <>
+                        <div className="w-12 h-12 border-4 border-medical-200 border-t-medical-600 rounded-full animate-spin mb-6"></div>
+                        <p className="text-gray-900 font-medium mb-4">Processing PDF...</p>
+                        <div className="w-full max-w-sm">
+                            <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                                <div 
+                                    className="bg-medical-600 h-full transition-all duration-300" 
+                                    style={{ width: `${progress}%` }}
+                                ></div>
+                            </div>
+                            <p className="text-gray-500 text-sm mt-2 text-center">{progress}%</p>
+                        </div>
+                        {progressText && (
+                            <p className="text-gray-600 text-center mt-4 text-sm">{progressText}</p>
                         )}
+                    </>
+                )}
+
+                {errorMessage && (
+                    <div className="flex flex-col items-center text-center">
+                        <AlertCircle className="w-16 h-16 text-red-400 mb-4" />
+                        <p className="text-red-700 font-medium mb-2">Extraction Failed</p>
+                        <p className="text-red-600 text-sm max-w-sm mb-6">{errorMessage}</p>
+                        <button
+                            onClick={() => {
+                                setFile(null);
+                                setErrorMessage('');
+                                setProgressText('');
+                            }}
+                            className="bg-white border border-red-300 text-red-700 font-medium py-2 px-6 rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                            Try Again
+                        </button>
                     </div>
                 )}
             </div>
-
-            {/* show live stream output only - hide separate 'Progress' box per design */}
-            {progressText && (
-                <div className="mt-4">
-                    <div className="flex flex-col gap-1">
-                        <h4 className="font-semibold text-sm text-gray-700">Live Stream Output</h4>
-                        <div id="progress" className="p-3 bg-gray-900 text-green-400 rounded-md border border-gray-800 max-h-64 overflow-y-auto text-xs font-mono whitespace-pre-wrap break-all shadow-inner">
-                            {progressText}
-                        </div>
-                    </div>
-                </div>
-            )}
-
         </div>
     );
 }

@@ -19,11 +19,11 @@ function App() {
     const [validationResult, setValidationResult] = useState(null);
 
     const handleUploadComplete = (data) => {
-        // Clear streaming text and store final payload
+        // data is the FHIR Bundle from /convert endpoint
         setStreamingText('');
         setProcessingLogs([]);
         setExtractedContext(data);
-        setCurrentStep(1); // Move to Review
+        setCurrentStep(1); // Go to Review step for editing
         setHighestStep(prev => Math.max(prev, 1));
     };
 
@@ -35,8 +35,9 @@ function App() {
 
     const handleValidationComplete = (result) => {
         setValidationResult(result);
-        // If validation fails entirely we could stay on step 2, but for now allow proceed if successful/warnings
-        if (result.isValid) {
+        // Move to Download section regardless of validation errors/warnings
+        // Users should be able to see/download even with issues
+        if (!result.error) {
             setCurrentStep(3); // Move to Download
             setHighestStep(prev => Math.max(prev, 3));
         }
@@ -120,8 +121,8 @@ function App() {
                             onReviewComplete={handleReviewComplete}
                             onDataChange={handleReviewDataChange}
                         />}
-                        {currentStep === 2 && <GenerateValidateSection reviewedData={reviewedData} onValidationComplete={handleValidationComplete} />}
-                        {currentStep === 3 && <DownloadSection fhirBundle={validationResult} bundleToDownload={getContextData().data} onReset={handleReset} />}
+                        {currentStep === 2 && <GenerateValidateSection reviewedData={extractedContext || reviewedData} onValidationComplete={handleValidationComplete} />}
+                        {currentStep === 3 && <DownloadSection fhirBundle={validationResult} bundleToDownload={validationResult?.fhirJson || getContextData().data} onReset={handleReset} />}
                     </div>
                 </div>
 
